@@ -136,7 +136,9 @@ def main():
                              + [f"{opts[0].param_groups[0]['lr']:.3g}", round(time.time() - t_start, 1)])
                 fh.flush()
         mem = torch.cuda.max_memory_allocated() / 2**30 if dev.type == "cuda" else 0.0
-        print(f"[train {name}] epoch {ep + 1}/{a.epochs} · loss {run / max(n, 1):.4f} · {(time.time() - t0) / 60:.1f} 분 · GPU 최대 {mem:.1f} GiB", flush=True)
+        sec = time.time() - t0
+        print(f"[train {name}] epoch {ep + 1}/{a.epochs} · loss {run / max(n, 1):.4f} · {sec / 60:.1f} 분 ({sec / max(n, 1):.2f} 초/스텝, "
+              f"전체 {a.epochs * steps_ep} 스텝이면 약 {sec / max(n, 1) * a.epochs * steps_ep / 3600:.1f} 시간) · GPU 최대 {mem:.1f} GiB", flush=True)
         torch.save({"model": M.save_state(model), "opts": [o.state_dict() for o in opts], "scheds": [s.state_dict() for s in scheds],
                     "step": step, "epoch": ep + 1, "rng": torch.get_rng_state(),
                     "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}, last + ".tmp")

@@ -233,6 +233,10 @@ def summary(a):
         res["decompose"] = D
     open(os.path.join(a.out, "tables.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
     json.dump(res, open(os.path.join(a.out, "summary.json"), "w"), indent=1, ensure_ascii=False)
+    for k, g in res["groups"].items():                               # 화면 (이슈 댓글 끝부분) 에 표 1 요약 — 이름과 숫자만
+        pc = lambda s: "—" if s is None else (f"{s['mean']:.2f}±{s['std']:.2f}" if s["n"] > 1 else f"{s['mean']:.2f}")
+        print(f"[표1] {k} (시드 {len(g['seeds'])}) · mAP {pc(g['all.map'])} · mAP50 {pc(g['all.map_50'])} · mAP75 {pc(g['all.map_75'])} · "
+              f"낮 {pc(g['day.map'])} · 밤 {pc(g['night.map'])} · {g['params']['detector_m']} M" + (f" · {g['latency_ms']} ms" if g["latency_ms"] else ""))
     for k, v in J.items():
         print(f"[판정] {k}: {v}")
     print(f"[report] 표 → {os.path.join(a.out, 'tables.md')} (실행 {len(runs)} 개)")
