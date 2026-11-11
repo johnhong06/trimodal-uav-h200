@@ -1,0 +1,12 @@
+{
+ "_note": "tools/make_splits.py 가 data.zip 에서 만든 목록. train/test = 저자 분할 (random_state=42), val = train 안에서 낮·밤마다 10 % (시드 0).",
+ "n_valid": 9750,
+ "n_train": 7800,
+ "n_test": 1950,
+ "n_val": 780,
+ "n_val_day": 266,
+ "n_val_night": 514,
+ "sha256_train": "cb70762a7ff785ee048366dcba750378b1caba25c6d0f6ed07600e495b721806",
+ "sha256_test": "b1e66f33ed956dfa0daa67a4d5e3c0791883f7a5fc2f5effedbc36ccc5d78c6c",
+ "sha256_val": "6082745759fedcd348e86e15486d3b33c3cd0c84258b0d8fc1549940bd3d3833"
+}

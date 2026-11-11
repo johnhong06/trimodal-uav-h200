@@ -1,0 +1,20 @@
+{
+ "_note": "논문 데이터셋 (저자 저장소 README 의 Dataset Link, Google Drive 폴더 안 data.zip 하나). 2026-11-11 로컬에서 받아 크기 · sha256 · 개수를 확인한 값. setup/get_data.py 가 읽는다.",
+ "zip": {
+  "name": "data.zip",
+  "size": 3558279309,
+  "sha256": "6d503f3d706308043ac17acada57c987a06cf97b82ad82586b4d68679ec779ad",
+  "drive_file_id": "1adkx3HYCoZjFFmfAAIiAI6-TK9mvw3t0",
+  "url": "https://drive.usercontent.google.com/download?id=1adkx3HYCoZjFFmfAAIiAI6-TK9mvw3t0&export=download&confirm=t",
+  "folder": "https://drive.google.com/drive/folders/1U2NJQMRz8uP8e-z9lCguRWVPWpXs4MmB"
+ },
+ "counts": {
+  "images": 10489,
+  "labels": 9751,
+  "labels_nonempty": 9750,
+  "boxes": 30634,
+  "train": 7800,
+  "test": 1950,
+  "val_in_train": 780
+ }
+}

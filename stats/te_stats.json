@@ -1,0 +1,9 @@
+{
+ "_note": "thermal (채널 3) · event (채널 4) 평균 · 표준편차, 0–1 범위, 저자 train 7,800 장의 모든 픽셀. tools/make_stats.py",
+ "n_images": 7800,
+ "n_pixels": 917989800,
+ "thermal_mean": 0.50411,
+ "thermal_std": 0.216514,
+ "event_mean": 0.170327,
+ "event_std": 0.110853
+}

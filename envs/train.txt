@@ -1,0 +1,22 @@
+# 학습·평가 환경. H200 에서는 run.sh 가 uv 로 Python 3.12.14 가상환경을 만들고 그 안의 pip 로 이 목록을 설치한다.
+# torch·torchvision·transformers·tokenizers·huggingface_hub·safetensors·numpy·pandas·pillow 판은 depthvlm-edge-h200 의 envs/train.txt 와 같다
+# (2026-10 H200 에서 설치·실행 확인된 조합). 나머지는 2026-11-11 로컬 CPU 시험 환경에서 uv 가 고른 판으로 고정.
+# torch 는 cu128 빌드 (H200 sm_90). 설치가 끝나면 run.sh 가 torch·torchvision 판을 제약 파일로 묶는다.
+# timm 은 넣지 않는다 (저자 코드 utils/timm_compat.py 가 없으면 자체 구현을 씀). matplotlib 도 넣지 않는다 (저자 코드의 그림 기능만 꺼짐).
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1
+torchvision==0.22.1
+transformers==5.2.0
+tokenizers==0.22.2
+huggingface_hub==1.33.0
+safetensors==0.8.0
+torchmetrics==1.9.0
+lightning-utilities==0.15.3
+pycocotools==2.0.11
+scikit-learn==1.9.1
+scipy==1.18.1
+joblib==1.6.0
+threadpoolctl==3.8.0
+numpy==2.2.6
+pandas==3.0.6
+pillow==12.3.0
