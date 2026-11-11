@@ -179,12 +179,18 @@ mkenv_body() {
 }
 TPY=""
 setup_env() {
-  local E=$WORK/envs/train h rc
+  local E=$WORK/envs/train h rc a n0 L=$LOGS/setup_env.log
   if [ -n "$PY" ]; then TPY=$PY; echo "[setup] 학습 파이썬 (주어진 것) $TPY"; return 0; fi
   h=$({ cat envs/train.txt; echo "uv $UV_VER python $PY_VER pip $PIP_VER"; } | sha256sum | cut -c1-16)
   if [ ! -f "$E/.ok" ] || [ "$(cat "$E/.ok")" != "$h" ]; then
-    mkenv_body envs/train.txt "$E" "$h" >> "$LOGS/setup_env.log" 2>&1; rc=$?
-    grep -aE '^\[env\]|^!!!' "$LOGS/setup_env.log" | tail -n 2
+    for a in 1 2 3; do                                             # 2026-11-11 작업 B: uv venv 가 23 초 만에 실패 (원인 미상, 직전 작업은 통과) → 다시 하기
+      touch "$L"; n0=$(wc -l < "$L")
+      mkenv_body envs/train.txt "$E" "$h" >> "$L" 2>&1; rc=$?
+      tail -n "+$((n0 + 1))" "$L" | grep -aE '^\[env\]|^!!!' | tail -n 2
+      [ $rc = 0 ] && break
+      tail -n "+$((n0 + 1))" "$L" | grep -avE '^\[env\]|^!!!|^[[:space:]]*$' | tail -n 4 | cut -c1-300 | sed 's/^/  로그: /'   # 이번 시도의 uv · pip 오류 줄
+      [ $a -lt 3 ] && { echo "[env] 60 초 뒤 다시 ($a/3)"; sleep 60; }
+    done
     [ $rc = 0 ] || return 1
     [ "$DRY_RUN" = 1 ] && return 0
   fi
@@ -300,7 +306,7 @@ os.replace(dst + ".tmp", dst)
 print(f"[zip] results.zip — 파일 {len(items)} 개 (체크포인트 {len(cks)}), {os.path.getsize(dst) / 2**20:.1f} MiB")
 PY
 }
-report() { run_step report "$LOGS/report.log" show "$TPY" -I -B -u src/report.py summary --runs "$RUNS" --out "$SUMM"; }
+report() { [ -n "$TPY" ] || return 0; run_step report "$LOGS/report.log" show "$TPY" -I -B -u src/report.py summary --runs "$RUNS" --out "$SUMM"; }
 has() { [[ ",$ARMS," == *",$1,"* ]]; }
 fail() { echo "!!! [$MODE] $1"; report; zip_results; exit 1; }
 
