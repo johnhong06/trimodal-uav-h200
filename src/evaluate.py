@@ -51,7 +51,9 @@ def main():
             for j, (p, t) in enumerate(zip(preds, tgts)):
                 s = ds.stems[i0 + j]
                 p = {k: v.cpu() for k, v in p.items()}
-                t = {"boxes": t["boxes"], "labels": t["labels"]}
+                # 작업자가 보낸 텐서는 공유 메모리라 살아 있는 동안 파일 핸들을 하나씩 쥔다 → 복사해서 쥔다
+                # (복사 안 하면 1,950 장 × 2 개가 쌓여 열린 파일 한도 1,024 를 넘음: 'received 0 items of ancdata', 2026-11-11 H200)
+                t = {"boxes": t["boxes"].clone(), "labels": t["labels"].clone()}
                 for k in ("all", "day" if is_day(s) else "night"):
                     mets[k].update([p], [t])
                 stems.append(s)

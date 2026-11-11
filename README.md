@@ -57,7 +57,8 @@ Aerodrone H200 에서 돌리려고 만든 공개 저장소다.
 ### 진행 상황
 
 - [x] H200 `smoke` (2026-11-11, 11 분, 모든 단계 통과)
-- [ ] H200 작업 A (`author` · `paper`)
+- [ ] H200 작업 A (`author` · `paper`) — 1 차 (2026-11-11) 는 저자 스크립트 학습 94 분 뒤 우리 평가에서 멈췄다.
+  평가 코드가 정답 텐서를 복사하지 않고 쥐고 있어서 test 1,950 장에서 열린 파일 한도를 넘었다 (smoke 는 64 장이라 드러나지 않음). 고쳐서 다시 낸다.
 
 ## 실험 1 — 어디서 점수를 잃나 (오차 분해)
 
@@ -182,16 +183,17 @@ test 정답 박스마다, 점수 0.5 이상 예측 가운데 IoU 0.5 · 0.75 · 
 | 3 | `bash run.sh all` | `7` | 실험 0 · 2 · 3 전부 (학습 12 번) 와 표 · 판정 |
 
 - `smoke` 는 2026-11-11 H200 에서 11 분에 끝났다 (환경 만들기 · Drive 에서 받기 2.1 분 · 풀기 36 초 포함).
-  스텝당 시간은 paper · base 1.04–1.11 초, inject 1.57 초 (배치 16). GPU 최대 메모리는 학습 하나에 71 GiB (inject 78 GiB) 라서 한 장에 하나씩만 돈다.
-- 이 값으로 어림한 `all` 은 학습 12 번에 약 29 시간이다 (15 epoch = 7,320 스텝: paper · base 하나 약 2.2 시간, 고르기 하나 약 2.0 시간, inject 하나 약 3.2 시간).
-  smoke 는 4 스텝뿐이라 초반 준비 시간이 섞여 있어서 실제로는 20–30 시간 사이로 본다.
+  GPU 최대 메모리는 학습 하나에 71 GiB (inject 78 GiB) 라서 한 장에 하나씩만 돈다.
+- 스텝당 시간은 작업 A 1 차에서 다시 쟀다. 저자 스크립트가 15 epoch (7,320 스텝, 배치 16) 을 94 분에 끝냈으니 스텝당 0.77 초다.
+  smoke 에서 잰 1.04–1.11 초는 4 스텝 값이라 초반 준비 시간이 섞여 있었다. inject 는 smoke 에서 DINOv2-L 몫으로 0.5 초쯤 더 걸렸다.
+- 이 값으로 어림한 `all` 은 학습 12 번에 약 21 시간이다 (paper · base 하나 약 1.6 시간, 고르기 하나 약 1.4 시간, inject 하나 약 2.5 시간).
 - 그래서 세 작업으로 나눠 돌린다. 재현 여부를 먼저 보려는 것이다.
 
   | 작업 | 이슈 명령 (할당량 `7`) | 어림 시간 |
   |---|---|---|
-  | A | `bash run.sh all ARMS=author,paper` | 약 9 시간 |
-  | B | `bash run.sh all ARMS=select,base` | 약 10.5 시간 |
-  | C | `bash run.sh all ARMS=inject OPT=<B 에서 고른 값>` | 약 10 시간 |
+  | A | `bash run.sh all ARMS=author,paper` | 약 6.5 시간 |
+  | B | `bash run.sh all ARMS=select,base` | 약 7.5 시간 |
+  | C | `bash run.sh all ARMS=inject OPT=<B 에서 고른 값>` | 약 7.5 시간 |
 
   A 와 B 는 서로 기대지 않는다. C 는 B 의 화면에 나오는 `[select] … → sgd|adamw` 값을 `OPT=` 로 넘긴다 (작업끼리는 파일이 이어지지 않음).
   세 작업의 `results.zip` 은 로컬에서 `runs/` 를 한 폴더에 모아 `python src/report.py summary --runs <폴더> --out <폴더>` 로 한 표로 합친다.
@@ -271,7 +273,7 @@ setup/        check.py · fetch_code.sh + code.sha256 · get_weights.py + weight
 src/          common.py · data.py · model.py · inject.py · train.py · evaluate.py · run_author.py · report.py
 splits/ stats/  저장소에 넣어 보내는 작은 목록
 tools/        로컬 도구 (make_splits.py · make_stats.py — data.zip 에서 위 목록을 만듦)
-tests/        CPU 시험 (test_parts.py · run_local.sh)
+tests/        CPU 시험 (test_parts.py · test_eval_fd.py · run_local.sh)
 docs/         ADMIN_ko.md (관리자 안내)
 ```
 
@@ -279,7 +281,7 @@ docs/         ADMIN_ko.md (관리자 안내)
 
 ```bash
 bash -n run.sh && bash run.sh check
-bash tests/run_local.sh <작업 폴더> <파이썬> <data.zip>   # 준비 → 데이터 → 부품 시험 → 아주 작은 smoke (LIMIT=4, inject 는 1 장)
+bash tests/run_local.sh <작업 폴더> <파이썬> <data.zip>   # 준비 → 데이터 → 부품 시험 → 평가 열린 파일 시험 → 아주 작은 smoke (LIMIT=4, inject 는 1 장)
 ```
 
 `tests/run_local.sh` 는 단계마다 메모리 한도 12 GB 의 systemd 범위 (`systemd-run --user --scope -p MemoryMax=12G`) 안에서 돈다.

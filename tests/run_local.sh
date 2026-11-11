@@ -16,5 +16,6 @@ box bash run.sh data WORK="$W" PY="$P" JOB=t_data DATA_ZIP="$Z" | grep -aE '^\[(
 export HF_HOME=$W/hf TRI_CODE=$W/code/trimodal-uav-det TRI_DATA=$W/data
 TRI_MIT=$(python3 -I setup/get_weights.py --dir mit_b1)/pytorch_model.bin; export TRI_MIT
 box "$P" -I -B tests/test_parts.py 2>&1 | grep -aE '^(PASS|FAIL|부품)'
+box "$P" -I -B tests/test_eval_fd.py "$W/t_fd" 2>&1 | grep -aE '^(PASS|FAIL)'
 box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke ARMS=author,paper,select,base LIMIT=4 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|select|판정|report|zip)|^!!!'
 box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke_inject ARMS=inject OPT=sgd LIMIT=1 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|판정|report|zip)|^!!!'
