@@ -1,6 +1,7 @@
 """CPU 부품 시험 — bash tests/run_local.sh 가 환경 변수 (TRI_CODE · TRI_MIT) 를 정하고 부른다.
 
-1. 사전학습 MiT-B1 이름 바꾸기: 저자 MiT 의 RGB 줄기 출력이 transformers SegformerModel 과 같은가 (네 stage)
+1. 사전학습 MiT-B1 이름 바꾸기: 저자 MiT 의 RGB 줄기 출력이 transformers SegformerModel 과 같은가 (네 stage).
+   데이터는 B · G · R 순서라서 우리 쪽에는 채널을 뒤집은 입력을, transformers 쪽에는 R · G · B 입력을 넣어 비교한다 (같아야 함)
 2. 보조 줄기 초기화: 블록 가중치는 RGB 와 같고, 첫 합성곱만 채널 평균
 3. 우리 모듈: A (융합 보정) 는 처음에 base 와 출력이 똑같고, B (경계 보정) 는 g = 0 에서 검출이 base 와 똑같다.
    투표는 정답 경계 맵이면 정답 변을 돌려주고, 화면 끝에 닿은 변은 건드리지 않는다. 손실 · 기울기 · 최적화 묶음 · 파라미터 수
@@ -38,7 +39,7 @@ hf = SegformerModel.from_pretrained(os.path.dirname(os.environ["TRI_MIT"])).eval
 x = torch.randn(1, 3, 224, 288)
 with torch.no_grad():
     ref = hf(pixel_values=x, output_hidden_states=True).hidden_states
-    y, outs = x, []
+    y, outs = x.flip(1), []                                       # 우리 인코더는 저장 순서 (B · G · R) 를 받는다
     for i in range(1, 5):
         y, h, w = getattr(enc, f"patch_embed{i}")(y)
         for b in getattr(enc, f"block{i}"):
@@ -53,6 +54,19 @@ ok(n == 2 * len(rgb_keys), f"사전학습 텐서 {n} 개 = RGB 줄기 {len(rgb_k
 ok(torch.equal(enc.block3[1].attn.kv.weight, enc.extra_block3[1].attn.kv.weight), "보조 줄기 블록 = RGB 줄기 블록")
 w_rgb, w_x = enc.patch_embed1.proj.weight, enc.extra_patch_embed1.proj.weight
 ok(w_x.shape[1] == 2 and torch.allclose(w_x[:, 0], w_rgb.mean(1)) and torch.allclose(w_x[:, 1], w_rgb.mean(1)), "보조 줄기 첫 합성곱 = RGB 채널 평균 × 2 채널")
+
+# 2b. 저장 순서 (B · G · R) 사진 → 검출기 정규화 → 첫 합성곱  =  R · G · B 사진 → ImageNet 정규화 → 사전학습 첫 합성곱
+bm = M.build("base")
+pic = torch.rand(5, 64, 80) * 255                                  # 채널 0–2 = B · G · R (0–255), 3 = thermal, 4 = event
+with torch.no_grad():
+    ours = bm.backbone.encoder.patch_embed1.proj(bm.transform.normalize(pic)[None, :3])
+    rgb = pic[[2, 1, 0]] / 255
+    ref = hf.encoder.patch_embeddings[0].proj(((rgb - torch.tensor(M.IMNET_MEAN)[:, None, None]) / torch.tensor(M.IMNET_STD)[:, None, None])[None])
+rel = (ours - ref).abs().max().item() / ref.abs().max().item()
+ok(rel < 1e-4, f"B·G·R 로 저장된 사진을 넣어도 첫 합성곱 출력이 R·G·B 사진을 사전학습 모델에 넣은 것과 같음 (상대 최대차 {rel:.1e})")
+pm, bmv = M.norm_values("paper"), M.norm_values("base")
+ok(pm[0][:3] == [0.485, 0.456, 0.406] and [round(v / 255, 3) for v in bmv[0][:3]] == [0.406, 0.456, 0.485]
+   and [round(v / 255, 3) for v in bmv[1][:3]] == [0.225, 0.224, 0.229], "정규화 값: paper 는 저자 그대로, base 는 ImageNet 값을 B·G·R 순서로")
 
 # 3 ────────────────────────────────────────────────────────────────
 import re  # noqa: E402

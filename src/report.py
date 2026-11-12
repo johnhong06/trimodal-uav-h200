@@ -17,9 +17,10 @@ import numpy as np
 
 PAPER_MAP, PAPER_MAP50, PAPER_PARAMS = 84.24, 98.95, 60.01
 W, H = 391, 301
-NAME = re.compile(r"^(author|paper|base|fuse|edge|both)_(sgd|adamw)_(full|sub)_s(\d+)$")
+NAME = re.compile(r"^(author|paper|base0|base|fuse|edge|both)_(sgd|adamw)_(full|sub)_s(\d+)$")
 OURS = ("fuse", "edge", "both")                 # 우리 모듈: A 융합 보정 · B 경계 보정 · A + B
-ARM_LABEL = {"base": "기본 설정 보강", "fuse": "A 융합 보정", "edge": "B 경계 보정", "both": "A + B"}
+# base0 = 채널 순서 (B · G · R) 를 맞추기 전의 base (작업 B, 2026-11-11). 로컬에서 그 실행 폴더 이름을 base0_* 으로 바꿔 합친다
+ARM_LABEL = {"base0": "기본 설정 보강, 채널 순서 고치기 전", "base": "기본 설정 보강", "fuse": "A 융합 보정", "edge": "B 경계 보정", "both": "A + B"}
 COLS = [("all", "map"), ("all", "map_50"), ("all", "map_75"), ("day", "map"), ("night", "map"), ("all", "map_small"), ("all", "map_medium")]
 
 
@@ -152,7 +153,7 @@ def summary(a):
     G = groups(runs)
     test = {k: v for k, v in G.items() if not k.endswith("_sub")}
     arm_of = lambda k: k.split("_")[0]
-    order = ["author_sgd_full", "paper_sgd_full"] + [k for a_ in ("base",) + OURS for k in sorted(test) if arm_of(k) == a_]
+    order = ["author_sgd_full", "paper_sgd_full"] + [k for a_ in ("base0", "base") + OURS for k in sorted(test) if arm_of(k) == a_]
     L = ["## 표 1. test 1,950 장 (%, 시드 평균 ± 표준편차)", "",
          "| 설정 | 시드 | mAP | mAP50 | mAP75 | 낮 mAP | 밤 mAP | small mAP | medium mAP | 파라미터 (M) | 추론 (ms) |",
          "|---|---|---|---|---|---|---|---|---|---|---|",
@@ -191,13 +192,13 @@ def summary(a):
     mean_of = lambda k: (gstat(test[k]) or {"mean": float("-inf")})["mean"] if k in test else float("-inf")
     for k in order:
         arm = arm_of(k)
-        if arm not in ("base",) + OURS or k not in test:
+        if arm not in ("base0", "base") + OURS or k not in test:
             continue
         xs = gstat(test[k])
         if xs is None:
             continue
         same = lambda a_: f"{a_}_{k.split('_')[1]}_full"             # 같은 최적화의 다른 팔
-        refs = [(same("base"), "기본 설정 보강")] if arm in OURS else []
+        refs = [(same("base"), "기본 설정 보강")] if arm in OURS else [(same("base0"), "채널 순서 고치기 전")] if arm == "base" else []
         if arm == "both":                                          # 합칠 가치: 둘 중 나은 하나보다도 개선인가
             one = max((same("fuse"), same("edge")), key=mean_of)
             refs.append((one, f"둘 중 나은 하나 ({label(one)})"))
@@ -218,7 +219,7 @@ def summary(a):
                     J[f"{label(k)} 예상 ({n1} Δ > {n2} Δ, 기본 설정 보강 대비)"] = f"{'맞음' if e1 > e2 else '아님'} ({n1} {e1:+.2f}, {n2} {e2:+.2f})"
     # 논문을 넘음: A + B → A · B 중 평균이 높은 것 → 기본 설정 보강 순서로 같은 규칙을 적용해 처음 넘는 것
     cands = ([g for g in order if arm_of(g) == "both"] + sorted((g for g in order if arm_of(g) in ("fuse", "edge")), key=mean_of, reverse=True)
-             + [g for g in order if arm_of(g) == "base"])
+             + [g for g in order if arm_of(g) == "base"] + [g for g in order if arm_of(g) == "base0"])
     for k in cands:
         xs = gstat(test[k]) if k in test else None
         if xs is None or not P:
@@ -228,7 +229,7 @@ def summary(a):
             J["논문을 넘음"] = f"예 — {label(k)} (평균 {xs['mean']:.2f} > {PAPER_MAP}, 논문 재현 대비 개선)"
             break
     else:
-        if P and any(arm_of(g) in ("base",) + OURS for g in test):
+        if P and any(arm_of(g) in ("base0", "base") + OURS for g in test):
             J["논문을 넘음"] = "아니오 (README 규칙: 시드 평균 > 84.24 이고 논문 재현 대비 '개선')"
     L += ["", "## 판정 (README '판정 기준')", ""] + [f"- {k}: {v}" for k, v in J.items()]
 

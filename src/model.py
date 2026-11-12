@@ -3,6 +3,9 @@
 팔 (arm)
   paper   저자 그대로: 처음부터 학습, 입력 0–255 를 0–1 용 평균·표준편차로 정규화 (저자 config.py 값)
   base    + ImageNet 사전학습 MiT-B1 (nvidia/mit-b1) 을 두 줄기에 · 입력을 /255 한 것과 같은 정규화 (RGB = ImageNet, thermal·event = 학습 분할 통계)
+          데이터의 채널 0–2 는 B · G · R 순서로 저장되어 있다 (저자 README 는 RGB 라고 적음 — 2026-11-12 사진으로 확인). 사전학습 가중치는 R · G · B 순서로
+          학습됐으므로 RGB 줄기 첫 합성곱의 입력 채널을 뒤집어 넣고 평균 · 표준편차도 저장 순서로 준다 → R · G · B 로 넣은 것과 같은 계산.
+          paper 팔은 처음부터 학습하므로 저자 그대로 둔다.
   fuse    base + A: 융합 직전 두 줄기의 픽셀별 scale · shift 보정 (src/rescale.py)
   edge    base + B: 픽셀별 경계 맵으로 박스 변 보정 (src/edge.py)
   both    base + A + B
@@ -20,7 +23,8 @@ from torchvision.ops import MultiScaleRoIAlign  # noqa: E402
 from common import author, need, te_stats  # noqa: E402
 
 ARMS = ("paper", "base", "fuse", "edge", "both")
-IMNET_MEAN, IMNET_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+IMNET_MEAN, IMNET_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)   # R · G · B
+STORED = (2, 1, 0)                               # 저장된 채널 0 · 1 · 2 = B · G · R → ImageNet (R · G · B) 값의 몇 번째인가
 
 
 def norm_values(arm):
@@ -29,8 +33,8 @@ def norm_values(arm):
         c = author().config.Config()
         return list(c.image_mean), list(c.image_std)
     s = te_stats()
-    mean = [m * 255 for m in IMNET_MEAN] + [s["thermal_mean"] * 255, s["event_mean"] * 255]
-    std = [v * 255 for v in IMNET_STD] + [s["thermal_std"] * 255, s["event_std"] * 255]
+    mean = [IMNET_MEAN[i] * 255 for i in STORED] + [s["thermal_mean"] * 255, s["event_mean"] * 255]
+    std = [IMNET_STD[i] * 255 for i in STORED] + [s["thermal_std"] * 255, s["event_std"] * 255]
     return mean, std
 
 
@@ -70,13 +74,15 @@ def map_mit(sd):
 
 
 def load_mit(enc, path):
-    """사전학습 가중치를 두 줄기에 넣는다. 보조 줄기 (thermal + event, 2 채널) 는 같은 가중치,
-    첫 합성곱만 RGB 3 채널 가중치의 평균을 2 채널로 복사. 융합 모듈 (MAGEs · BiTEs) 은 저자 초기화 그대로."""
+    """사전학습 가중치를 두 줄기에 넣는다. RGB 줄기의 첫 합성곱은 입력 채널을 저장 순서 (B · G · R) 에 맞춰 뒤집는다.
+    보조 줄기 (thermal + event, 2 채널) 는 같은 가중치, 첫 합성곱만 RGB 3 채널 가중치의 평균을 2 채널로 복사.
+    융합 모듈 (MAGEs · BiTEs) 은 저자 초기화 그대로."""
     rgb = map_mit(torch.load(path, map_location="cpu", weights_only=True))
     full = dict(rgb)
     nx = enc.extra_patch_embed1.proj.in_channels
     for k, v in rgb.items():
         if k == "patch_embed1.proj.weight":
+            full[k] = v[:, list(STORED)].clone()
             v = v.mean(1, keepdim=True).repeat(1, nx, 1, 1)
         full["extra_" + k] = v.clone()
     r = enc.load_state_dict(full, strict=False)
