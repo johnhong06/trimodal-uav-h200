@@ -7,9 +7,11 @@
 최적화
   sgd    저자 값: SGD lr 0.02 · momentum 0.9 · weight decay 1e-4 (모든 학습 파라미터)
   adamw  AdamW lr 1e-4 · weight decay 0.05 (2 차원 이상 가중치만, 편향 · 정규화는 0) — SegFormer 류 사전학습 백본에 흔한 값
-  inject 팔의 주입 모듈 (proj · gate) 은 따로 AdamW (wd 0): proj 1e-4 · gate 1e-3 — depthvlm-silog 해결 실험과 같은 값
+  우리 모듈 (fuse 의 보정 모듈 · edge 의 경계 맵) 은 따로 AdamW lr 1e-3 · weight decay 0.05 (2 차원 이상 가중치만, 편향 · 정규화 · g 는 0).
+  처음부터 학습하는 작은 어텐션 모듈이라 본체의 값 (SGD 0.02 · AdamW 1e-4) 으로는 느리게 배운다 (2026-11-12 합성 실험, NOTES D-15).
+  warmup · cosine 일정은 본체와 같다.
 
-결과 (--out): train_log.csv (10 스텝마다) · done.json (끝) · 화면은 epoch 마다 한 줄. 체크포인트 (--ckpt): last.pt · final.pt (고정 DINOv2 제외)
+결과 (--out): train_log.csv (10 스텝마다) · done.json (끝) · 화면은 epoch 마다 한 줄. 체크포인트 (--ckpt): last.pt · final.pt
 """
 import argparse
 import csv
@@ -25,22 +27,24 @@ import data as D  # noqa: E402
 import model as M  # noqa: E402
 from common import seed_all, write_json  # noqa: E402
 
-INJ = ("backbone.proj.", "backbone.gate")
+OURS = (".fix.", "roi_heads.edge.")                                # 우리 모듈의 파라미터 이름: src/rescale.py · src/edge.py
+LOSSES = ("loss_classifier", "loss_box_reg", "loss_objectness", "loss_rpn_box_reg")
+EDGE_LOSSES = ("loss_edge_map", "loss_edge_conf", "loss_edge_box")
 
 
 def optimizers(model, opt):
     named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
-    det = [(n, p) for n, p in named if not n.startswith(INJ)]
+    ours = [p for n, p in named if any(k in n for k in OURS)]
+    det = [(n, p) for n, p in named if not any(k in n for k in OURS)]
     if opt == "sgd":
         o = torch.optim.SGD([p for _, p in det], lr=0.02, momentum=0.9, weight_decay=1e-4)
     else:
         o = torch.optim.AdamW([{"params": [p for _, p in det if p.ndim > 1], "weight_decay": 0.05},
                                {"params": [p for _, p in det if p.ndim <= 1], "weight_decay": 0.0}], lr=1e-4)
     opts = [o]
-    proj = [p for n, p in named if n.startswith("backbone.proj.")]
-    gate = [p for n, p in named if n == "backbone.gate"]
-    if proj:
-        opts.append(torch.optim.AdamW([{"params": proj, "lr": 1e-4}, {"params": gate, "lr": 1e-3}], weight_decay=0.0))
+    if ours:
+        opts.append(torch.optim.AdamW([{"params": [p for p in ours if p.ndim > 1], "weight_decay": 0.05},
+                                       {"params": [p for p in ours if p.ndim <= 1], "weight_decay": 0.0}], lr=1e-3))
     return opts
 
 
@@ -78,7 +82,7 @@ def main():
     last = os.path.join(a.ckpt, "last.pt")
     if a.resume and os.path.exists(last):
         ck = torch.load(last, map_location="cpu", weights_only=False)
-        M.load_state(model, ck["model"])
+        model.load_state_dict(ck["model"])
         for o, s in zip(opts, ck["opts"]):
             o.load_state_dict(s)
         for sc, s in zip(scheds, ck["scheds"]):
@@ -90,14 +94,15 @@ def main():
         print(f"[train {name}] 이어 하기: epoch {ep0} · step {step}", flush=True)
     p = M.count_params(model)
     print(f"[train {name}] {a.arm} · {a.opt} · {a.split} {len(ds):,} 장 · 시드 {a.seed} · {a.epochs} epoch × {steps_ep} 스텝 · "
-          f"파라미터 {p['detector_m']} M (고정 인코더 {p['frozen_encoder_m']} M)", flush=True)
+          f"파라미터 {p['detector_m']} M", flush=True)
+    keys = LOSSES + (EDGE_LOSSES if a.arm in ("edge", "both") else ())
 
     logf = os.path.join(a.out, "train_log.csv")
     new = not (a.resume and os.path.exists(logf) and step > 0)
     fh = open(logf, "w" if new else "a", newline="")
     log = csv.writer(fh)
     if new:
-        log.writerow(["epoch", "step", "loss", "loss_classifier", "loss_box_reg", "loss_objectness", "loss_rpn_box_reg", "lr", "sec"])
+        log.writerow(["epoch", "step", "loss", *keys, "lr", "sec"])
     t_start = time.time()
     for ep in range(ep0, a.epochs):
         model.train()
@@ -131,24 +136,24 @@ def main():
             run += loss.item()
             n += 1
             if step % 10 == 0:
-                log.writerow([ep + 1, step, round(loss.item(), 5)] + [round(ld[k].item(), 5) for k in
-                             ("loss_classifier", "loss_box_reg", "loss_objectness", "loss_rpn_box_reg")]
+                log.writerow([ep + 1, step, round(loss.item(), 5)] + [round(ld[k].item(), 5) for k in keys]
                              + [f"{opts[0].param_groups[0]['lr']:.3g}", round(time.time() - t_start, 1)])
                 fh.flush()
         mem = torch.cuda.max_memory_allocated() / 2**30 if dev.type == "cuda" else 0.0
         sec = time.time() - t0
         print(f"[train {name}] epoch {ep + 1}/{a.epochs} · loss {run / max(n, 1):.4f} · {sec / 60:.1f} 분 ({sec / max(n, 1):.2f} 초/스텝, "
-              f"전체 {a.epochs * steps_ep} 스텝이면 약 {sec / max(n, 1) * a.epochs * steps_ep / 3600:.1f} 시간) · GPU 최대 {mem:.1f} GiB", flush=True)
-        torch.save({"model": M.save_state(model), "opts": [o.state_dict() for o in opts], "scheds": [s.state_dict() for s in scheds],
+              f"전체 {a.epochs * steps_ep} 스텝이면 약 {sec / max(n, 1) * a.epochs * steps_ep / 3600:.1f} 시간) · GPU 최대 {mem:.1f} GiB"
+              + (f" · g {float(model.roi_heads.edge.gate):.3f}" if a.arm in ("edge", "both") else ""), flush=True)
+        torch.save({"model": model.state_dict(), "opts": [o.state_dict() for o in opts], "scheds": [s.state_dict() for s in scheds],
                     "step": step, "epoch": ep + 1, "rng": torch.get_rng_state(),
                     "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}, last + ".tmp")
         os.replace(last + ".tmp", last)
     fh.close()
-    torch.save(M.save_state(model), os.path.join(a.ckpt, "final.pt"))
+    torch.save(model.state_dict(), os.path.join(a.ckpt, "final.pt"))
     write_json(os.path.join(a.out, "done.json"), {
         "arm": a.arm, "opt": a.opt, "split": a.split, "seed": a.seed, "epochs": a.epochs, "images": len(ds), "steps": step,
         "minutes": round((time.time() - t_start) / 60, 1), "gpu_peak_gib": round(torch.cuda.max_memory_allocated() / 2**30, 2) if dev.type == "cuda" else None,
-        "params": M.count_params(model), "gate": [round(float(x), 5) for x in model.backbone.gate] if a.arm == "inject" else None})
+        "params": M.count_params(model), "edge_gate": round(float(model.roi_heads.edge.gate), 5) if a.arm in ("edge", "both") else None})
     print(f"[train {name}] 끝 — {step} 스텝", flush=True)
     return 0
 

@@ -43,7 +43,6 @@ class Net(torch.nn.Module):
 
 D.make = lambda split, limit=0: Fake(N)
 M.build = lambda arm, *a, **k: Net()
-M.load_state = lambda model, sd: None
 M.count_params = lambda model: {}
 work = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp()
 os.makedirs(work, exist_ok=True)

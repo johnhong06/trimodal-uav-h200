@@ -2,6 +2,7 @@
 
 결과 (--out)
   metrics.json  {"all"|"day"|"night": {map, map_50, map_75, map_small, map_medium, map_large, mar_100}, 장 수, 파라미터, (추론 시간)}
+                edge · both 팔은 "all_novote" (같은 체크포인트에서 투표를 끄고 잰 값) 와 "edge_gate" (보정 세기 g) 도
   preds.npz     사진 이름 · 예측 박스 · 점수 · 정답 박스 (원본 301×391 좌표) — src/report.py 의 오차 분해용
 --time N: 1 장씩 N 장 추론 시간을 잰다 (워밍업 10 장, cuda 동기화, p50 ms). 다른 프로세스가 GPU 를 같이 쓰지 않을 때만 의미가 있다.
 """
@@ -38,16 +39,23 @@ def main():
     name = os.path.basename(os.path.dirname(os.path.normpath(a.out)))
     dev = torch.device(a.device)
     model = M.build(a.arm)
-    M.load_state(model, torch.load(a.ckpt, map_location="cpu", weights_only=True))
+    model.load_state_dict(torch.load(a.ckpt, map_location="cpu", weights_only=True))
     model.to(dev).eval()
+    heads = getattr(model, "roi_heads", None)
+    edge = getattr(heads, "edge", None)                            # 경계 맵이 달린 팔 (src/edge.py)
     ds = D.make(a.split, a.limit)
-    mets = {k: MeanAveragePrecision(iou_type="bbox") for k in ("all", "day", "night")}
+    mets = {k: MeanAveragePrecision(iou_type="bbox") for k in ("all", "day", "night") + (("all_novote",) if edge is not None else ())}
     stems, dimg, dbox, dsc, gimg, gbox = [], [], [], [], [], []
     loader = DataLoader(ds, batch_size=a.bs, shuffle=False, num_workers=4, collate_fn=D.collate)
     i0 = 0
     with torch.no_grad():
         for imgs, tgts in loader:
-            preds = model([x.to(dev) for x in imgs])
+            x = [x.to(dev) for x in imgs]
+            preds = model(x)
+            if edge is not None:                                   # 같은 입력을 투표 없이 한 번 더
+                heads.refine = False
+                raw = model(x)
+                heads.refine = True
             for j, (p, t) in enumerate(zip(preds, tgts)):
                 s = ds.stems[i0 + j]
                 p = {k: v.cpu() for k, v in p.items()}
@@ -56,6 +64,8 @@ def main():
                 t = {"boxes": t["boxes"].clone(), "labels": t["labels"].clone()}
                 for k in ("all", "day" if is_day(s) else "night"):
                     mets[k].update([p], [t])
+                if edge is not None:
+                    mets["all_novote"].update([{k: v.cpu() for k, v in raw[j].items()}], [t])
                 stems.append(s)
                 dimg += [len(stems) - 1] * len(p["boxes"])
                 dbox.append(p["boxes"].numpy())
@@ -64,7 +74,9 @@ def main():
                 gbox.append(t["boxes"].numpy())
             i0 += len(imgs)
     out = {"split": a.split, "n_images": len(stems), "n_day": sum(map(is_day, stems)), "params": M.count_params(model)}
-    n_sub = {"all": len(stems), "day": out["n_day"], "night": len(stems) - out["n_day"]}
+    n_sub = {"all": len(stems), "day": out["n_day"], "night": len(stems) - out["n_day"], "all_novote": len(stems)}
+    if edge is not None:
+        out["edge_gate"] = round(float(edge.gate), 5)
     for k, m in mets.items():                                      # 사진이 없는 부분 · 박스가 없는 크기 구간은 torchmetrics 가 -1 → None
         r = m.compute() if n_sub[k] else {}
         out[k] = {kk: (round(float(r[kk]), 6) if kk in r and float(r[kk]) >= 0 else None) for kk in KEYS}
@@ -88,7 +100,8 @@ def main():
     pc = lambda v: "—" if v is None else f"{100 * v:.2f}"
     al, dy, nt = out["all"], out["day"], out["night"]
     print(f"[eval {name}] {a.split} {len(stems):,} 장 · mAP {pc(al['map'])} · mAP50 {pc(al['map_50'])} · mAP75 {pc(al['map_75'])} · "
-          f"낮 {pc(dy['map'])} · 밤 {pc(nt['map'])}" + (f" · {out['latency_ms_p50']} ms" if out.get("latency_ms_p50") else ""), flush=True)
+          f"낮 {pc(dy['map'])} · 밤 {pc(nt['map'])}" + (f" · {out['latency_ms_p50']} ms" if out.get("latency_ms_p50") else "")
+          + (f" · 투표 끔 mAP {pc(out['all_novote']['map'])} · g {out['edge_gate']:.3f}" if edge is not None else ""), flush=True)
     return 0
 
 

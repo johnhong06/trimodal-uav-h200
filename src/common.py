@@ -3,8 +3,7 @@
 run.sh 가 정하는 환경 변수:
   TRI_CODE  저자 저장소 (setup/fetch_code.sh 가 받은 radlab-sketch/trimodal-uav-det @ e1d2dede)
   TRI_DATA  images/ · labels/ 가 있는 폴더 (setup/get_data.py 가 푼 곳)
-  TRI_MIT   nvidia/mit-b1 의 pytorch_model.bin (base · inject 팔)
-  TRI_DINO  facebook/dinov2-large 스냅숏 폴더 (inject 팔)
+  TRI_MIT   nvidia/mit-b1 의 pytorch_model.bin (paper 를 뺀 모든 팔)
 """
 import json
 import os

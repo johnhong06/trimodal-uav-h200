@@ -5,17 +5,14 @@
   "revision": "13ddceec4e8bdf401e7cd7acf5aebc526222518c",
   "license": "모델 카드가 NVlabs/SegFormer 의 LICENSE (NVIDIA Source Code License, 비상업 연구용) 를 가리킴",
   "files": {
-   "config.json": {"size": 70044, "git_sha1": "5d021aae94e2ea7827829ea5eb2d624ad1bc5197"},
-   "pytorch_model.bin": {"size": 54732285, "sha256": "980b86b60db37b1b1528086f6c53d253d879e9e09ebe07397b40fd275738a3bf"}
-  }
- },
- "dinov2_large": {
-  "repo": "facebook/dinov2-large",
-  "revision": "47b73eefe95e8d44ec3623f8890bd894b6ea2d6c",
-  "license": "Apache-2.0",
-  "files": {
-   "config.json": {"size": 549, "git_sha1": "5def28dd2a0ecb2561a4649703f13c4dc595ee95"},
-   "model.safetensors": {"size": 1217522888, "sha256": "399fba97a95f22c36834418bc69373364a99af3a1153da1c0fb31db567c92e23"}
+   "config.json": {
+    "size": 70044,
+    "git_sha1": "5d021aae94e2ea7827829ea5eb2d624ad1bc5197"
+   },
+   "pytorch_model.bin": {
+    "size": 54732285,
+    "sha256": "980b86b60db37b1b1528086f6c53d253d879e9e09ebe07397b40fd275738a3bf"
+   }
   }
  }
 }

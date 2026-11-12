@@ -3,7 +3,9 @@
 팔 (arm)
   paper   저자 그대로: 처음부터 학습, 입력 0–255 를 0–1 용 평균·표준편차로 정규화 (저자 config.py 값)
   base    + ImageNet 사전학습 MiT-B1 (nvidia/mit-b1) 을 두 줄기에 · 입력을 /255 한 것과 같은 정규화 (RGB = ImageNet, thermal·event = 학습 분할 통계)
-  inject  base + 고정 DINOv2-L 특징을 0 에서 시작하는 게이트로 FPN 에 더함 (src/inject.py)
+  fuse    base + A: 융합 직전 두 줄기의 픽셀별 scale · shift 보정 (src/rescale.py)
+  edge    base + B: 픽셀별 경계 맵으로 박스 변 보정 (src/edge.py)
+  both    base + A + B
 모든 팔에서 Faster R-CNN 설정 (앵커 · RoIAlign · 이미지 크기 기본값 800/1333) 은 저자와 같다.
 """
 import os
@@ -17,7 +19,7 @@ from torchvision.ops import MultiScaleRoIAlign  # noqa: E402
 
 from common import author, need, te_stats  # noqa: E402
 
-ARMS = ("paper", "base", "inject")
+ARMS = ("paper", "base", "fuse", "edge", "both")
 IMNET_MEAN, IMNET_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 
 
@@ -83,41 +85,29 @@ def load_mit(enc, path):
     return len(full)
 
 
-def build(arm, dino_dir=None, dino_cfg=None):
-    """arm → FasterRCNN. dino_cfg (시험용) 를 주면 그 설정으로 무작위 초기화한 DINOv2 를 쓴다."""
+def build(arm):
+    """arm → FasterRCNN."""
     assert arm in ARMS, arm
     t = author()
     c = t.config.Config()
     enc = t.models.encoder.get_encoder(c.backbone_type, in_chans_rgb=c.in_chans_rgb, in_chans_x=c.in_chans_x)
     if arm != "paper":
         load_mit(enc, need("TRI_MIT"))
+    if arm in ("fuse", "both"):
+        import rescale
+        rescale.attach(enc)
     backbone = t.models.backbone.InterModalBackbone(enc, fpn_out_channels=c.fpn_out_channels)
-    if arm == "inject":
-        from inject import InjectBackbone
-        backbone = InjectBackbone(backbone, dino_dir or (None if dino_cfg else need("TRI_DINO")), dino_cfg)
     mean, std = norm_values(arm)
-    return FasterRCNN(backbone, num_classes=2,                         # 저자: 라벨 최대 id 0 + 1, 배경 + 1
-                      rpn_anchor_generator=AnchorGenerator(sizes=c.anchor_sizes, aspect_ratios=c.anchor_aspect_ratios),
-                      box_roi_pool=MultiScaleRoIAlign(featmap_names=c.roi_featmap_names, output_size=c.roi_output_size,
-                                                      sampling_ratio=c.roi_sampling_ratio),
-                      image_mean=mean, image_std=std)
-
-
-FROZEN = "backbone.dino."
-
-
-def save_state(model):
-    """고정 DINOv2 가중치는 빼고 저장 (HF 에서 다시 받으므로)."""
-    return {k: v for k, v in model.state_dict().items() if not k.startswith(FROZEN)}
-
-
-def load_state(model, sd):
-    r = model.load_state_dict(sd, strict=False)
-    assert not r.unexpected_keys, r.unexpected_keys[:5]
-    assert all(k.startswith(FROZEN) for k in r.missing_keys), [k for k in r.missing_keys if not k.startswith(FROZEN)][:5]
+    model = FasterRCNN(backbone, num_classes=2,                        # 저자: 라벨 최대 id 0 + 1, 배경 + 1
+                       rpn_anchor_generator=AnchorGenerator(sizes=c.anchor_sizes, aspect_ratios=c.anchor_aspect_ratios),
+                       box_roi_pool=MultiScaleRoIAlign(featmap_names=c.roi_featmap_names, output_size=c.roi_output_size,
+                                                       sampling_ratio=c.roi_sampling_ratio),
+                       image_mean=mean, image_std=std)
+    if arm in ("edge", "both"):
+        import edge
+        edge.attach(model)
+    return model
 
 
 def count_params(model):
-    tot = sum(p.numel() for n, p in model.named_parameters() if not n.startswith(FROZEN))
-    frozen = sum(p.numel() for n, p in model.named_parameters() if n.startswith(FROZEN))
-    return {"detector_m": round(tot / 1e6, 2), "frozen_encoder_m": round(frozen / 1e6, 2)}
+    return {"detector_m": round(sum(p.numel() for p in model.parameters()) / 1e6, 2)}

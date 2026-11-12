@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # 로컬 CPU 시험: 준비 (저자 코드 · 가중치) → 데이터 (로컬 data.zip) → 부품 시험 → 아주 작은 smoke.
-# GPU 는 쓰지 않는다 (CUDA_VISIBLE_DEVICES 비움). CPU 는 nice 19 · 스레드 6 개. 작업 폴더에 약 8 GB 를 쓴다 (풀린 데이터 6.2 GB + DINOv2-L 1.2 GB).
+# GPU 는 쓰지 않는다 (CUDA_VISIBLE_DEVICES 비움). CPU 는 nice 19 · 스레드 6 개. 작업 폴더에 약 6.5 GB 를 쓴다 (풀린 데이터 6.2 GB + MiT-B1 가중치).
 #
 # ★ 모든 단계를 메모리 한도를 건 systemd 범위 (MemoryMax) 안에서 돌린다. 2026-11-11 사고: VSCode 터미널에서 바로 띄운 CPU smoke 의
-#   inject 단계 (DINOv2-L 을 CPU 로, 사진 4 장) 가 20 GB 까지 올라 전역 OOM 이 났고, 같은 범위 (VSCode) 의 편집기 프로세스가 함께 죽었다.
-#   범위를 따로 두면 한도를 넘어도 이 시험만 끝난다. inject 는 사진 1 장으로 따로 돈다 (12 GB 안).
+#   한 단계 (지금은 없앤 DINOv2-L 주입 팔, 사진 4 장) 가 20 GB 까지 올라 전역 OOM 이 났고, 같은 범위 (VSCode) 의 편집기 프로세스가 함께 죽었다.
+#   범위를 따로 두면 한도를 넘어도 이 시험만 끝난다. smoke 는 사진 2 장으로 돈다 (CPU 에서 4 장 배치는 12 GB 를 넘는다).
+#   저자 스크립트 단계 (author) 는 최소 4 장을 한 배치로 학습해서 여기서는 뺀다 — H200 에서 확인한다.
 # 사용: bash tests/run_local.sh <작업 폴더> <파이썬 (envs/train.txt 의 판, CPU torch 면 됨)> <data.zip>
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,5 +18,5 @@ export HF_HOME=$W/hf TRI_CODE=$W/code/trimodal-uav-det TRI_DATA=$W/data
 TRI_MIT=$(python3 -I setup/get_weights.py --dir mit_b1)/pytorch_model.bin; export TRI_MIT
 box "$P" -I -B tests/test_parts.py 2>&1 | grep -aE '^(PASS|FAIL|부품)'
 box "$P" -I -B tests/test_eval_fd.py "$W/t_fd" 2>&1 | grep -aE '^(PASS|FAIL)'
-box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke ARMS=author,paper,select,base LIMIT=4 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|select|판정|report|zip)|^!!!'
-box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke_inject ARMS=inject OPT=sgd LIMIT=1 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|판정|report|zip)|^!!!'
+box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke ARMS=paper,select,base LIMIT=2 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|select|판정|report|zip)|^!!!'
+box bash run.sh smoke WORK="$W" PY="$P" JOB=t_smoke_ours ARMS=fuse,edge,both OPT=sgd LIMIT=2 DATA_ZIP="$Z" | grep -aE '^\[(train|eval|판정|report|zip)|^!!!'

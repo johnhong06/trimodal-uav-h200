@@ -13,7 +13,7 @@ H200 관리자께 드리는 안내입니다. 3-모달 UAV 차량 검출 실험 (
 |---|---|---|
 | `bash run.sh check` | `1` | 1–2 분. 경로 · 공간 · GPU · 외부 접속 확인. 아무것도 설치하지 않음 |
 | `bash run.sh smoke` | `7` | 모든 단계를 아주 작게 (환경 만들기 · 데이터 받기 포함) |
-| `bash run.sh all` | `7` | 본 실험 (학습 12 번, 끝까지 돌고 결과를 묶음) |
+| `bash run.sh all ARMS=…` | `7` | 본 실험. 단계를 나눠 여러 번 요청드립니다 (작업 하나에 학습 3–6 번, 6–11 시간. 끝까지 돌고 결과를 묶음) |
 
 ## 2. 올려 주실 것 — 보통은 없습니다
 
@@ -23,7 +23,7 @@ H200 관리자께 드리는 안내입니다. 3-모달 UAV 차량 검출 실험 (
 |---|---|---|
 | 데이터셋 `data.zip` | 논문 저자의 Google Drive 공개 링크 | 3.56 GB |
 | 저자 코드 | `codeload.github.com/radlab-sketch/trimodal-uav-det` (고정 커밋) | 1 MB |
-| 사전학습 가중치 | Hugging Face `nvidia/mit-b1` · `facebook/dinov2-large` (고정 리비전) | 1.3 GB |
+| 사전학습 가중치 | Hugging Face `nvidia/mit-b1` (고정 리비전) | 55 MB |
 | 파이썬 패키지 | PyPI · PyTorch 휠 색인 | 수 GB |
 
 **컨테이너에서 Google Drive 가 막혀 있을 때만** `data.zip` 을 올려 주시면 됩니다 (`bash run.sh check` 화면의 `접속 Google Drive (data.zip)` 줄로 알 수 있습니다).
@@ -43,8 +43,8 @@ sha256sum data.zip      # 위 값과 같아야 합니다. macOS 는 shasum -a 25
 
 ## 4. 공간 (참고)
 
-- `/app/scratch` (작업마다 새로 쓰고 비워짐): 환경 약 10 GB + 풀린 데이터 6.2 GB + 가중치 1.3 GB + 체크포인트 (학습 하나에 약 0.5–0.8 GB, 12 번이면 약 10 GB). 합쳐 30 GB 안팎입니다.
-- `/app/output`: 결과만 씁니다 — 기록 · 지표 · 예측 + `results.zip` (첫 시드 체크포인트 넷 포함 약 1 GB).
+- `/app/scratch` (작업마다 새로 쓰고 비워짐): 환경 약 10 GB + 풀린 데이터 6.2 GB + 가중치 0.1 GB + 체크포인트 (학습 하나에 약 0.5–0.8 GB, 작업 하나에 6 번까지 약 5 GB). 합쳐 25 GB 안팎입니다.
+- `/app/output`: 결과만 씁니다 — 기록 · 지표 · 예측 + `results.zip` (단계마다 첫 시드 체크포인트 포함, 작업 하나에 0.2–0.5 GB).
 
 ## 5. 결과 요청
 

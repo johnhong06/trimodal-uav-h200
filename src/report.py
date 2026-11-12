@@ -17,7 +17,9 @@ import numpy as np
 
 PAPER_MAP, PAPER_MAP50, PAPER_PARAMS = 84.24, 98.95, 60.01
 W, H = 391, 301
-NAME = re.compile(r"^(author|paper|base|inject)_(sgd|adamw)_(full|sub)_s(\d+)$")
+NAME = re.compile(r"^(author|paper|base|fuse|edge|both)_(sgd|adamw)_(full|sub)_s(\d+)$")
+OURS = ("fuse", "edge", "both")                 # 우리 모듈: A 융합 보정 · B 경계 보정 · A + B
+ARM_LABEL = {"base": "기본 설정 보강", "fuse": "A 융합 보정", "edge": "B 경계 보정", "both": "A + B"}
 COLS = [("all", "map"), ("all", "map_50"), ("all", "map_75"), ("day", "map"), ("night", "map"), ("all", "map_small"), ("all", "map_medium")]
 
 
@@ -125,6 +127,13 @@ def decompose(pred_file, score=0.5, ths=(0.5, 0.75, 0.9)):
     return out
 
 
+def label(k):
+    arm, opt = k.split("_")[:2]
+    if arm in ARM_LABEL:
+        return f"{ARM_LABEL[arm]} ({'SGD' if opt == 'sgd' else 'AdamW'})"
+    return {"author": "저자 스크립트 그대로", "paper": "논문 설정 재현 (우리 학습 루프)"}[arm]
+
+
 def fmt(s, prec=2):
     if s is None:
         return "—"
@@ -142,10 +151,8 @@ def summary(a):
                        + [r["m"]["params"]["detector_m"], r["m"].get("latency_ms_p50", "")])
     G = groups(runs)
     test = {k: v for k, v in G.items() if not k.endswith("_sub")}
-    order = ["author_sgd_full", "paper_sgd_full"] + sorted(k for k in test if k.startswith("base_")) + sorted(k for k in test if k.startswith("inject_"))
-    label = {"author_sgd_full": "저자 스크립트 그대로", "paper_sgd_full": "논문 설정 재현 (우리 학습 루프)",
-             "base_sgd_full": "기본 설정 보강 (SGD)", "base_adamw_full": "기본 설정 보강 (AdamW)",
-             "inject_sgd_full": "우리 방법: + DINOv2-L 게이트 주입 (SGD)", "inject_adamw_full": "우리 방법: + DINOv2-L 게이트 주입 (AdamW)"}
+    arm_of = lambda k: k.split("_")[0]
+    order = ["author_sgd_full", "paper_sgd_full"] + [k for a_ in ("base",) + OURS for k in sorted(test) if arm_of(k) == a_]
     L = ["## 표 1. test 1,950 장 (%, 시드 평균 ± 표준편차)", "",
          "| 설정 | 시드 | mAP | mAP50 | mAP75 | 낮 mAP | 밤 mAP | small mAP | medium mAP | 파라미터 (M) | 추론 (ms) |",
          "|---|---|---|---|---|---|---|---|---|---|---|",
@@ -159,8 +166,7 @@ def summary(a):
         lat = [r["m"].get("latency_ms_p50") for r in rs if r["m"].get("latency_ms_p50")]
         prm = rs[0]["m"]["params"]
         res["groups"][k] = {"seeds": sorted(r["seed"] for r in rs), **{kk: v for kk, v in st.items()}, "params": prm, "latency_ms": lat[0] if lat else None}
-        p_txt = f"{prm['detector_m']:.2f}" + (f" + 고정 {prm['frozen_encoder_m']:.0f}" if prm["frozen_encoder_m"] else "")
-        L.append(f"| {label.get(k, k)} | {len(rs)} | " + " | ".join(fmt(st[f'{p}.{kk}']) for p, kk in COLS) + f" | {p_txt} | {lat[0] if lat else '—'} |")
+        L.append(f"| {label(k)} | {len(rs)} | " + " | ".join(fmt(st[f'{p}.{kk}']) for p, kk in COLS) + f" | {prm['detector_m']:.2f} | {lat[0] if lat else '—'} |")
 
     sel = {k: v for k, v in G.items() if k.endswith("_sub")}
     if sel:
@@ -182,30 +188,61 @@ def summary(a):
             av = 100 * A[0]["m"]["all"]["map"]
             ok = ps["min"] - 0.5 <= av <= ps["max"] + 0.5
             J["A/A"] = f"{'같은 학습' if ok else '다른 학습'} (저자 스크립트 {av:.2f}, 우리 루프 범위 {ps['min']:.2f}–{ps['max']:.2f} ± 0.5)"
+    mean_of = lambda k: (gstat(test[k]) or {"mean": float("-inf")})["mean"] if k in test else float("-inf")
     for k in order:
-        if not (k.startswith("base_") or k.startswith("inject_")) or k not in test:
+        arm = arm_of(k)
+        if arm not in ("base",) + OURS or k not in test:
             continue
         xs = gstat(test[k])
         if xs is None:
             continue
-        refs = [("paper_sgd_full", "논문 재현")] + ([("base_" + k.split("_")[1] + "_full", "기본 설정 보강")] if k.startswith("inject_") else [])
+        same = lambda a_: f"{a_}_{k.split('_')[1]}_full"             # 같은 최적화의 다른 팔
+        refs = [(same("base"), "기본 설정 보강")] if arm in OURS else []
+        if arm == "both":                                          # 합칠 가치: 둘 중 나은 하나보다도 개선인가
+            one = max((same("fuse"), same("edge")), key=mean_of)
+            refs.append((one, f"둘 중 나은 하나 ({label(one)})"))
+        refs.append(("paper_sgd_full", "논문 재현"))
         for rk, rl in refs:
             if rk in test:
                 v, d, sp = judge(xs, gstat(test[rk]))
-                J[f"{label.get(k, k)} vs {rl}"] = v + ("" if d is None else f" (Δ {d:+.2f}, 시드 폭 {sp:.2f})")
-        J[f"{label.get(k, k)} vs 논문 보고값"] = f"평균 {xs['mean']:.2f} vs {PAPER_MAP} ({xs['mean'] - PAPER_MAP:+.2f})"
-    for k in [g for g in order if g.startswith("inject_")] + [g for g in order if g.startswith("base_")]:   # 논문을 넘음: inject 먼저, 못 넘으면 base
+                J[f"{label(k)} vs {rl}"] = v + ("" if d is None else f" (Δ {d:+.2f}, 시드 폭 {sp:.2f})")
+        J[f"{label(k)} vs 논문 보고값"] = f"평균 {xs['mean']:.2f} vs {PAPER_MAP} ({xs['mean'] - PAPER_MAP:+.2f})"
+        b = test.get(same("base"))
+        for want, (p1, k1, n1), (p2, k2, n2) in ((("fuse", "both"), ("night", "map", "밤"), ("day", "map", "낮")),      # 결과 전에 적어 둔 예상 (README 실험 3)
+                                                 (("edge", "both"), ("all", "map_75", "mAP75"), ("all", "map_50", "mAP50"))):
+            if arm in want and b:
+                d1 = [gstat(z, p1, k1) for z in (test[k], b)]
+                d2 = [gstat(z, p2, k2) for z in (test[k], b)]
+                if all(d1) and all(d2):
+                    e1, e2 = d1[0]["mean"] - d1[1]["mean"], d2[0]["mean"] - d2[1]["mean"]
+                    J[f"{label(k)} 예상 ({n1} Δ > {n2} Δ, 기본 설정 보강 대비)"] = f"{'맞음' if e1 > e2 else '아님'} ({n1} {e1:+.2f}, {n2} {e2:+.2f})"
+    # 논문을 넘음: A + B → A · B 중 평균이 높은 것 → 기본 설정 보강 순서로 같은 규칙을 적용해 처음 넘는 것
+    cands = ([g for g in order if arm_of(g) == "both"] + sorted((g for g in order if arm_of(g) in ("fuse", "edge")), key=mean_of, reverse=True)
+             + [g for g in order if arm_of(g) == "base"])
+    for k in cands:
         xs = gstat(test[k]) if k in test else None
         if xs is None or not P:
             continue
         v, _, _ = judge(xs, gstat(P))
         if xs["mean"] > PAPER_MAP and v == "개선":
-            J["논문을 넘음"] = f"예 — {label.get(k, k)} (평균 {xs['mean']:.2f} > {PAPER_MAP}, 논문 재현 대비 개선)"
+            J["논문을 넘음"] = f"예 — {label(k)} (평균 {xs['mean']:.2f} > {PAPER_MAP}, 논문 재현 대비 개선)"
             break
     else:
-        if P and any(g.startswith(("base_", "inject_")) for g in test):
+        if P and any(arm_of(g) in ("base",) + OURS for g in test):
             J["논문을 넘음"] = "아니오 (README 규칙: 시드 평균 > 84.24 이고 논문 재현 대비 '개선')"
     L += ["", "## 판정 (README '판정 기준')", ""] + [f"- {k}: {v}" for k, v in J.items()]
+
+    NV = {k: test[k] for k in order if k in test and all("all_novote" in r["m"] for r in test[k])}
+    if NV:
+        L += ["", "## 표 4. B 의 투표를 끄고 잰 값 — 같은 체크포인트, test (%, 시드 평균 ± 표준편차)", "",
+              "투표를 꺼도 오른 몫은 경계 맵 보조 손실이 특징을 바꾼 효과, 켰을 때 더 오른 몫이 박스 변 보정의 효과다. g = 학습된 보정 세기.", "",
+              "| 설정 | mAP (투표 켬) | mAP (투표 끔) | mAP75 (켬) | mAP75 (끔) | g |", "|---|---|---|---|---|---|"]
+        res["novote"] = {}
+        for k, rs in NV.items():
+            g_ = stat([r["m"]["edge_gate"] for r in rs])
+            res["novote"][k] = {"on": gstat(rs), "off": gstat(rs, "all_novote"), "gate": g_}
+            L.append(f"| {label(k)} | {fmt(gstat(rs))} | {fmt(gstat(rs, 'all_novote'))} | {fmt(gstat(rs, 'all', 'map_75'))} | "
+                     f"{fmt(gstat(rs, 'all_novote', 'map_75'))} | {fmt(g_, 3)} |")
 
     D = {}
     for k in order:
@@ -226,10 +263,10 @@ def summary(a):
                 q = d[s]
                 if not q["n_gt"]:
                     continue
-                L.append(f"| {label.get(k, k)} | {s} | {q['n_gt']:.0f} | " + " | ".join(
+                L.append(f"| {label(k)} | {s} | {q['n_gt']:.0f} | " + " | ".join(
                     "—" if q[f"recall_{t}"] is None else f"{100 * q[f'recall_{t}']:.1f}" for t in (0.5, 0.75, 0.9))
                     + f" | {q['best_iou_median']:.3f} |")
-            L.append(f"| {label.get(k, k)} | 잘못 찾은 수 / 장 | | {d['fp_per_image']:.3f} | | | |")
+            L.append(f"| {label(k)} | 잘못 찾은 수 / 장 | | {d['fp_per_image']:.3f} | | | |")
         res["decompose"] = D
     open(os.path.join(a.out, "tables.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
     json.dump(res, open(os.path.join(a.out, "summary.json"), "w"), indent=1, ensure_ascii=False)

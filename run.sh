@@ -6,8 +6,8 @@
 #   bash run.sh all [ARMS=…] [SEEDS=…]    # 준비 → 데이터 → 단계마다 학습 · 평가 → 표 → results.zip (단계마다 다시 묶음)
 #   bash run.sh setup [DRY_RUN=1] | data  # 한 단계만 (작업끼리 파일이 안 이어지므로 data 는 setup 도 먼저 한다)
 # KEY=값 (이슈 한 줄 명령에는 환경 변수를 못 넣으므로 인자로):
-#   ARMS=author,paper,select,base,inject  all 에서 돌릴 단계 (쉼표). 단계 뜻은 README '실험'
-#   SEEDS=0,1,2   OPT=sgd|adamw (select 를 빼고 base · inject 를 돌릴 때 최적화)   EPOCHS=15   LIMIT=0 (학습 · 평가 장 수 제한)
+#   ARMS=author,paper,select,base,fuse,edge,both  all 에서 돌릴 단계 (쉼표). 단계 뜻은 README '실험' (fuse = A · edge = B · both = A + B)
+#   SEEDS=0,1,2   OPT=sgd|adamw (select 를 빼고 base · fuse · edge · both 를 돌릴 때 최적화)   EPOCHS=15   LIMIT=0 (학습 · 평가 장 수 제한)
 #   TIME=200 (첫 시드의 test 평가에서 1 장씩 추론 시간을 잴 장 수, 0 = 안 잼)   CKPT=seed0|all|none (results.zip 에 넣을 final.pt)
 #   STALL_MIN=40 (로그가 이만큼 그대로면 멈춘 것으로 보고 끔)   PROGRESS_SEC=1800   RETRY=2 (학습이 죽으면 last.pt 에서 다시)
 #   JOB=<결과 폴더 이름>   DATA_ZIP=<data.zip 경로>   DRY_RUN=1 (setup: 큰 것을 받지 않음)
@@ -35,11 +35,11 @@ chk ARMS "$LIST"; chk SEEDS "$LIST"; chk EPOCHS "$INT"; chk LIMIT "$INT"; chk TI
 case ${OPT:-} in ""|sgd|adamw) ;; *) echo "!!! OPT = sgd | adamw"; exit 2;; esac
 case ${CKPT:-seed0} in seed0|all|none) ;; *) echo "!!! CKPT = seed0 | all | none"; exit 2;; esac
 case ${DRY_RUN:-0} in 0) ;; 1) [ "$MODE" = setup ] || { echo "!!! DRY_RUN=1 은 setup 모드에만"; exit 2; };; *) echo "!!! DRY_RUN = 0 | 1"; exit 2;; esac
-_a=${ARMS:-}; for x in ${_a//,/ }; do case $x in author|paper|select|base|inject) ;; *) echo "!!! ARMS 의 '$x' — author | paper | select | base | inject"; exit 2;; esac; done
+_a=${ARMS:-}; for x in ${_a//,/ }; do case $x in author|paper|select|base|fuse|edge|both) ;; *) echo "!!! ARMS 의 '$x' — author | paper | select | base | fuse | edge | both"; exit 2;; esac; done
 if [ "$MODE" = smoke ]; then
-  ARMS=${ARMS:-author,paper,select,base,inject}; SEEDS=${SEEDS:-0}; EPOCHS=${EPOCHS:-1}; LIMIT=${LIMIT:-64}; TIME=${TIME:-5}; CKPT=${CKPT:-none}
+  ARMS=${ARMS:-author,paper,select,base,fuse,edge,both}; SEEDS=${SEEDS:-0}; EPOCHS=${EPOCHS:-1}; LIMIT=${LIMIT:-64}; TIME=${TIME:-5}; CKPT=${CKPT:-none}
 fi
-ARMS=${ARMS:-author,paper,select,base,inject}; SEEDS=${SEEDS:-0,1,2}; OPT=${OPT:-}; EPOCHS=${EPOCHS:-15}; LIMIT=${LIMIT:-0}; TIME=${TIME:-200}
+ARMS=${ARMS:-author,paper,select,base,fuse,edge,both}; SEEDS=${SEEDS:-0,1,2}; OPT=${OPT:-}; EPOCHS=${EPOCHS:-15}; LIMIT=${LIMIT:-0}; TIME=${TIME:-200}
 CKPT=${CKPT:-seed0}; STALL_MIN=${STALL_MIN:-40}; PROGRESS_SEC=${PROGRESS_SEC:-1800}; RETRY=${RETRY:-2}; DRY_RUN=${DRY_RUN:-0}
 DATA_ZIP=${DATA_ZIP:-}; PY=${PY:-}
 [ -n "$SEEDS" ] || { echo "!!! SEEDS 가 비어 있음"; exit 2; }
@@ -215,8 +215,8 @@ setup_all() {
 }
 export_weights() {
   local m d
-  m=$("$SYSPY" -I -B setup/get_weights.py --dir mit_b1) && d=$("$SYSPY" -I -B setup/get_weights.py --dir dinov2_large) || { echo "!!! [setup] 가중치가 캐시에 없음"; return 1; }
-  export TRI_MIT=$m/pytorch_model.bin TRI_DINO=$d HF_HUB_OFFLINE=1
+  m=$("$SYSPY" -I -B setup/get_weights.py --dir mit_b1) || { echo "!!! [setup] 가중치가 캐시에 없음"; return 1; }
+  export TRI_MIT=$m/pytorch_model.bin HF_HUB_OFFLINE=1
 }
 data_step() {
   local s=()
@@ -275,11 +275,11 @@ author_stage() {  # 저자 학습 스크립트 그대로 (시드 SEED0) → 우�
   eval_one "$name" paper test "$SEED0"
 }
 CHOSEN=""
-opt_for() {  # base · inject 의 최적화: select 결과 → OPT= → 없으면 멈춤
+opt_for() {  # base · fuse · edge · both 의 최적화: select 결과 → OPT= → 없으면 멈춤
   if [ -f "$SUMM/choice.json" ]; then CHOSEN=$("$SYSPY" -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["opt"])' "$SUMM/choice.json")
   elif [ -n "$OPT" ]; then CHOSEN=$OPT
-  else echo "!!! base · inject 의 최적화를 정할 수 없음 — ARMS 에 select 를 넣거나 OPT=sgd|adamw 를 준다"; return 1; fi
-  echo "[run] base · inject 최적화 = $CHOSEN"
+  else echo "!!! base · fuse · edge · both 의 최적화를 정할 수 없음 — ARMS 에 select 를 넣거나 OPT=sgd|adamw 를 준다"; return 1; fi
+  echo "[run] base · fuse · edge · both 최적화 = $CHOSEN"
 }
 zip_results() {  # /app/output/<작업>/results.zip — logs · runs (기록 · 지표 · 예측) · summary · meta + CKPT 에 따른 final.pt
   local cks=()
@@ -328,13 +328,15 @@ case "$MODE" in
       run_step select "$LOGS/select.log" show "$TPY" -I -B -u src/report.py select --runs "$RUNS" --out "$SUMM/choice.json" || fail "고르기 실패"
       zip_results
     fi
-    if has base || has inject; then opt_for || fail "최적화 미정"; fi
+    if has base || has fuse || has edge || has both; then opt_for || fail "최적화 미정"; fi
     if has base; then
       for s in ${SEEDS//,/ }; do train_eval "base_${CHOSEN}_full_s$s" base "$CHOSEN" full "$s" test || fail "base 시드 $s 실패"; done
       report; zip_results
     fi
-    if has inject; then
-      for s in ${SEEDS//,/ }; do train_eval "inject_${CHOSEN}_full_s$s" inject "$CHOSEN" full "$s" test || fail "inject 시드 $s 실패"; done
-    fi
+    for arm in fuse edge both; do                                 # 우리 모듈: A · B · A + B
+      has $arm || continue
+      for s in ${SEEDS//,/ }; do train_eval "${arm}_${CHOSEN}_full_s$s" $arm "$CHOSEN" full "$s" test || fail "$arm 시드 $s 실패"; done
+      report; zip_results
+    done
     report; zip_results;;
 esac

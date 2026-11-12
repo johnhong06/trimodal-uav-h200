@@ -2,7 +2,7 @@
 LFS 파일은 sha256, 작은 파일은 git blob sha1. 토큰은 쓰지 않는다. 받기가 실패하면 30 초 쉬고 3 번까지.
 
 사용:
-  python setup/get_weights.py [--only mit_b1,dinov2_large]   # 받기 + 확인 (학습 환경, huggingface_hub). 이미 받은 파일은 확인만
+  python setup/get_weights.py [--only mit_b1]   # 받기 + 확인 (학습 환경, huggingface_hub). 이미 받은 파일은 확인만
   python3 setup/get_weights.py --dry_run                     # 받지 않고 HF API 로 리비전 · 크기 · 해시만 대조 (표준 라이브러리)
   python3 setup/get_weights.py --dir mit_b1                  # 받은 스냅숏 폴더 경로를 찍는다 (네트워크 없음, 없으면 종료 1)
 종료 코드: 0 통과, 1 실패.
